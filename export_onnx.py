@@ -28,23 +28,23 @@ def quantize_int8(input_path, output_path):
     quantize_dynamic(
         model_input=input_path,
         model_output=output_path,
-        weight_type=QuantType.QInt8,
-        optimize_model=True
+        weight_type=QuantType.QInt8
     )
     print(f"INT8 quantization complete!")
 
 
 def quantize_int4(input_path, output_path):
-    """Quantize ONNX model to INT4 using dynamic quantization."""
-    from onnxruntime.quantization import quantize_dynamic, QuantType
+    """Quantize ONNX model to INT4 using weight-only quantization."""
+    from onnxruntime.quantization.matmul_nbits_quantizer import MatMulNBitsQuantizer
     
     print(f"Quantizing to INT4: {input_path} -> {output_path}")
-    quantize_dynamic(
-        model_input=input_path,
-        model_output=output_path,
-        weight_type=QuantType.QInt4,
-        optimize_model=True
+    quantizer = MatMulNBitsQuantizer(
+        model=input_path,
+        block_size=128,
+        is_symmetric=False,
     )
+    quantizer.process()
+    quantizer.model.save_model_to_file(output_path)
     print(f"INT4 quantization complete!")
 
 
@@ -56,8 +56,7 @@ def quantize_fp8(input_path, output_path):
     quantize_dynamic(
         model_input=input_path,
         model_output=output_path,
-        weight_type=QuantType.QFLOAT8E4M3FN,
-        optimize_model=True
+        weight_type=QuantType.QFLOAT8E4M3FN
     )
     print(f"FP8 quantization complete!")
 
