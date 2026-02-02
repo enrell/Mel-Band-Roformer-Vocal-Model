@@ -41,6 +41,101 @@ def pad_at_dim(t, pad, dim=-1, value=0.):
     return F.pad(t, (*zeros, *pad), value=value)
 
 
+def real_istft(stft_repr, n_fft, hop_length, win_length, window, normalized=False, length=None):
+    """
+    ONNX-compatible ISTFT that operates on real-valued tensors.
+    
+    Args:
+        stft_repr: Real-valued tensor of shape (batch, freq, time, 2) where last dim is [real, imag]
+        n_fft: FFT size
+        hop_length: Hop length
+        win_length: Window length
+        window: Window tensor
+        normalized: Whether STFT was normalized
+        length: Expected output length
+    
+    Returns:
+        Reconstructed audio of shape (batch, time)
+    """
+    batch, n_freqs, n_frames, _ = stft_repr.shape
+    device = stft_repr.device
+    dtype = stft_repr.dtype
+    
+    expected_signal_len = n_fft + hop_length * (n_frames - 1)
+    
+    # Create inverse DFT matrix for real-valued computation
+    # For real signals, we only need the positive frequencies
+    n = torch.arange(n_fft, device=device, dtype=dtype)
+    k = torch.arange(n_freqs, device=device, dtype=dtype)
+    
+    # cos and sin components of inverse DFT
+    angles = 2 * torch.pi * k.unsqueeze(1) * n.unsqueeze(0) / n_fft
+    cos_matrix = torch.cos(angles)  # (n_freqs, n_fft)
+    sin_matrix = torch.sin(angles)  # (n_freqs, n_fft)
+    
+    # Account for the fact that DC and Nyquist (if present) are not doubled
+    # For real signals: X[k] = X*[N-k], so we only have unique values for k=0 to N/2
+    scale = torch.ones(n_freqs, device=device, dtype=dtype) * 2.0
+    scale[0] = 1.0
+    if n_fft % 2 == 0 and n_freqs == n_fft // 2 + 1:
+        scale[-1] = 1.0
+    
+    cos_matrix = cos_matrix * scale.unsqueeze(1)
+    sin_matrix = sin_matrix * scale.unsqueeze(1)
+    
+    # Unnormalize if needed
+    if normalized:
+        cos_matrix = cos_matrix * (n_fft ** 0.5)
+        sin_matrix = sin_matrix * (n_fft ** 0.5)
+    
+    # stft_repr: (batch, freq, time, 2)
+    real_part = stft_repr[..., 0]  # (batch, freq, time)
+    imag_part = stft_repr[..., 1]  # (batch, freq, time)
+    
+    # Inverse DFT: x[n] = (1/N) * sum_k (real[k]*cos + imag[k]*sin)
+    # (batch, freq, time) x (freq, n_fft) -> (batch, time, n_fft)
+    real_part = real_part.transpose(1, 2)  # (batch, time, freq)
+    imag_part = imag_part.transpose(1, 2)  # (batch, time, freq)
+    
+    # frames: (batch, time, n_fft)
+    frames = torch.matmul(real_part, cos_matrix) + torch.matmul(imag_part, sin_matrix)
+    frames = frames / n_fft
+    
+    # Apply window
+    if window is not None:
+        # Pad window to n_fft if necessary
+        if window.shape[0] < n_fft:
+            pad_left = (n_fft - window.shape[0]) // 2
+            pad_right = n_fft - window.shape[0] - pad_left
+            window = F.pad(window, (pad_left, pad_right))
+        frames = frames * window.unsqueeze(0).unsqueeze(0)
+    
+    # Overlap-add
+    output = torch.zeros(batch, expected_signal_len, device=device, dtype=dtype)
+    window_sum = torch.zeros(expected_signal_len, device=device, dtype=dtype)
+    
+    for i in range(n_frames):
+        start = i * hop_length
+        output[:, start:start + n_fft] = output[:, start:start + n_fft] + frames[:, i, :]
+        if window is not None:
+            window_sum[start:start + n_fft] = window_sum[start:start + n_fft] + window ** 2
+        else:
+            window_sum[start:start + n_fft] = window_sum[start:start + n_fft] + 1.0
+    
+    # Normalize by window sum (avoid division by zero)
+    window_sum = torch.clamp(window_sum, min=1e-8)
+    output = output / window_sum.unsqueeze(0)
+    
+    # Trim or pad to expected length
+    if length is not None:
+        if output.shape[1] > length:
+            output = output[:, :length]
+        elif output.shape[1] < length:
+            output = F.pad(output, (0, length - output.shape[1]))
+    
+    return output
+
+
 # norm
 
 class RMSNorm(Module):
@@ -509,8 +604,16 @@ class MelBandRoformer(Module):
 
         stft_repr = rearrange(stft_repr, 'b n (f s) t c -> (b n s) f t c', s=self.audio_channels)
 
-        recon_audio = torch.istft(stft_repr, **self.stft_kwargs, window=stft_window, return_complex=False,
-                                  length=istft_length)
+        # Use ONNX-compatible real-valued ISTFT
+        recon_audio = real_istft(
+            stft_repr,
+            n_fft=self.stft_kwargs['n_fft'],
+            hop_length=self.stft_kwargs['hop_length'],
+            win_length=self.stft_kwargs['win_length'],
+            window=stft_window,
+            normalized=self.stft_kwargs['normalized'],
+            length=istft_length
+        )
 
         recon_audio = rearrange(recon_audio, '(b n s) t -> b n s t', b=batch, s=self.audio_channels, n=num_stems)
 
