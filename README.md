@@ -12,7 +12,34 @@ Inference - `python inference.py --config_path configs/config_vocals_mel_band_ro
 
 You can export the model to ONNX format for faster inference on various platforms:
 
-`python export_onnx.py --config_path configs/config_vocals_mel_band_roformer.yaml --model_path MelBandRoformer.ckpt --output_path MelBandRoformer.onnx`
+```bash
+python export_onnx.py --config_path configs/config_vocals_mel_band_roformer.yaml --model_path MelBandRoformer.ckpt --output_path MelBandRoformer
+```
+
+### Quantization Options
+
+The export script supports several quantization options to reduce model size:
+
+| Option | Description | Approximate Size |
+|--------|-------------|------------------|
+| (none) | FP32 (default) | ~874MB |
+| `--fp16` | FP16 half precision | ~437MB |
+| `--int8` | INT8 dynamic quantization | ~220MB |
+| `--int4` | INT4 dynamic quantization | ~110MB |
+| `--fp8` | FP8 (E4M3FN) quantization | ~220MB |
+
+Example with FP16 quantization:
+```bash
+python export_onnx.py --model_path MelBandRoformer.ckpt --output_path MelBandRoformer --fp16
+```
+
+This will create both `MelBandRoformer.onnx` (FP32) and `MelBandRoformer_fp16.onnx` (FP16).
+
+You can combine multiple options to export several quantized variants at once:
+```bash
+python export_onnx.py --model_path MelBandRoformer.ckpt --output_path MelBandRoformer --fp16 --int8 --int4
+```
+
 
 The model will output a vocals and instrumental file for every .wav file inside the --input_folder and save them to the --store_dir folder.
 
