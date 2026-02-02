@@ -1,0 +1,5 @@
+output/*
+checkpoints/*
+inputs/*
+AGENTS.md
+.crush

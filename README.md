@@ -8,6 +8,12 @@ Install requirements - `pip install -r requirements.txt`
 
 Inference - `python inference.py --config_path configs/config_vocals_mel_band_roformer.yaml --model_path melbandroformer.ckpt --input_folder songsfolder --store_dir outputsfolder`
 
+# ONNX Export
+
+You can export the model to ONNX format for faster inference on various platforms:
+
+`python export_onnx.py --config_path configs/config_vocals_mel_band_roformer.yaml --model_path MelBandRoformer.ckpt --output_path MelBandRoformer.onnx`
+
 The model will output a vocals and instrumental file for every .wav file inside the --input_folder and save them to the --store_dir folder.
 
 [num_overlap](https://github.com/KimberleyJensen/Mel-Band-Roformer-Vocal-Model/blob/41d04ae1c8ea89261b488e90953192efe650fa4f/configs/config_vocals_mel_band_roformer.yaml#L38) - Increasing this value can improve the quality of the outputs due to helping with artifacts created when putting the chunks back together. This will make inference times longer (you don't need to go higher than 8)
